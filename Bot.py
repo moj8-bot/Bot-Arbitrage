@@ -8,7 +8,7 @@ from web3 import Web3
 # --- CONFIGURATION RÉALISTE (2 000 $ TOTAL SUR 2 ACTIFS - ZÉRO TRANSFERT PAYANT) ---
 DUREE_MINUTES = 1440          # 24 heures
 CAPITAL_PAR_ACTIF = 1000.0    # 1 000 $ par actif (250 $ par poche x 4)
-MISE_PAR_TRADE = 110.0        # 110 $ par trade -> 2 balles par sens
+MISE_PAR_TRADE = 210.0        # 110 $ par trade -> 2 balles par sens
 
 FRAIS_CEX_REEL = 0.0005       # 0.05 % (exécution immédiate Taker réaliste)
 GAS_BASE_USDC = 0.03          # 0.03 $ par swap sur Base
