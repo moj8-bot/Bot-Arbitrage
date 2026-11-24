@@ -5,14 +5,13 @@ from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
 from web3 import Web3
 
-# --- CONFIGURATION RÉALISTE (2 000 $ TOTAL SUR 2 ACTIFS) ---
+# --- CONFIGURATION RÉALISTE (2 000 $ TOTAL SUR 2 ACTIFS - ZÉRO TRANSFERT PAYANT) ---
 DUREE_MINUTES = 1440          # 24 heures
 CAPITAL_PAR_ACTIF = 1000.0    # 1 000 $ par actif (250 $ par poche x 4)
-MISE_PAR_TRADE = 110.0        # 110 $ par trade -> permet 2 trades d'affilée par côté
+MISE_PAR_TRADE = 110.0        # 110 $ par trade -> 2 balles par sens
 
 FRAIS_CEX_REEL = 0.0005       # 0.05 % (exécution immédiate Taker réaliste)
 GAS_BASE_USDC = 0.03          # 0.03 $ par swap sur Base
-COUT_TRANSFERT_REBAL = 0.15   # 0.15 $ (frais retrait CEX sur réseau Base + gas transfert)
 COOLDOWN_SECONDES = 15.0      # Verrou anti-doublon après chaque trade
 
 CEX_HOST = "".join(["api", ".", "coinbase", ".", "com"])
@@ -98,13 +97,9 @@ for cfg in ACTIFS_CIBLES:
         "cex_token": qty_init,
         "dex_usdc": 250.0,
         "dex_token": qty_init,
-        "init_usdc_tot": 500.0,
-        "init_token_tot": qty_init * 2,
-        "prix_depart": p_init,
         "prix_actuel": p_init,
         "trades_ok": 0,
         "echecs_mev": 0,
-        "rebalancements": 0,
         "frais_payes": 0.0,
         "gain_arbitrage_pur": 0.0,
         "pause_jusqua": 0.0
@@ -114,42 +109,9 @@ LOG_CSV = "simulation_propre_2000.csv"
 with open(LOG_CSV, "w", newline="") as f:
     csv.writer(f).writerow(["date_heure", "actif", "action", "gain_net_trade", "gain_arb_cumule", "valeur_portefeuille"])
 
-def verifier_reequilibrage(bot, p_cex, now_str):
-    cfg = bot["cfg"]
-    besoin_transfert = False
-    detail = ""
-
-    if (bot["cex_usdc"] < MISE_PAR_TRADE + 5 or bot["dex_usdc"] < MISE_PAR_TRADE + 5) and (bot["cex_usdc"] + bot["dex_usdc"] > 260):
-        moitie_usdc = (bot["cex_usdc"] + bot["dex_usdc"] - COUT_TRANSFERT_REBAL) / 2.0
-        bot["cex_usdc"] = moitie_usdc
-        bot["dex_usdc"] = moitie_usdc
-        besoin_transfert = True
-        detail = "Transfert USDC CEX<->DEX"
-
-    val_cex_tok = bot["cex_token"] * p_cex
-    val_dex_tok = bot["dex_token"] * p_cex
-    if (val_cex_tok < MISE_PAR_TRADE + 5 or val_dex_tok < MISE_PAR_TRADE + 5) and (val_cex_tok + val_dex_tok > 260):
-        frais_en_tok = COUT_TRANSFERT_REBAL / p_cex
-        moitie_tok = (bot["cex_token"] + bot["dex_token"] - frais_en_tok) / 2.0
-        bot["cex_token"] = moitie_tok
-        bot["dex_token"] = moitie_tok
-        besoin_transfert = True
-        detail = f"Transfert {cfg['nom'].split('-')} CEX<->DEX"
-
-    if besoin_transfert:
-        bot["rebalancements"] += 1
-        bot["frais_payes"] += COUT_TRANSFERT_REBAL
-        bot["gain_arbitrage_pur"] -= COUT_TRANSFERT_REBAL
-        bot["pause_jusqua"] = time.time() + 120.0
-        val_tot = bot["cex_usdc"] + bot["dex_usdc"] + (bot["cex_token"] + bot["dex_token"]) * p_cex
-        print(f"[{now_str}] [{cfg['nom']:<8}] AUTO-RÉÉQUILIBRAGE ({detail}, -{COUT_TRANSFERT_REBAL}$ frais, pause 2 min)", flush=True)
-        with open(LOG_CSV, "a", newline="") as f:
-            csv.writer(f).writerow([now_str, cfg["nom"], f"REBALANCE ({detail})", -COUT_TRANSFERT_REBAL, round(bot["gain_arbitrage_pur"], 3), round(val_tot, 2)])
-
 def check_single_bot(bot):
     cfg = bot["cfg"]
-    now_ts = time.time()
-    if now_ts < bot["pause_jusqua"]:
+    if time.time() < bot["pause_jusqua"]:
         return
 
     try:
@@ -162,6 +124,7 @@ def check_single_bot(bot):
         spread_a = (bid_cex - p_dex) / p_dex
         spread_v = (p_dex - ask_cex) / ask_cex
 
+        # Skewing naturel : baisse le seuil dans le sens inverse si un côté a pris ses 2 balles
         ratio_dex = bot["dex_token"] / (bot["dex_token"] + bot["cex_token"] + 1e-9)
         seuil_a = cfg["s_skew"] if ratio_dex < 0.35 else cfg["s_base"]
         seuil_v = cfg["s_skew"] if ratio_dex > 0.65 else cfg["s_base"]
@@ -237,12 +200,11 @@ def check_single_bot(bot):
             print(f"[{now_str}] [{cfg['nom']:<8}] {action} | Gain Pur Cumulé: {bot['gain_arbitrage_pur']:+.2f} $ | Portefeuille: {val_tot:.2f} $", flush=True)
             with open(LOG_CSV, "a", newline="") as f:
                 csv.writer(f).writerow([now_str, cfg["nom"], action, round(delta_net, 3), round(bot["gain_arbitrage_pur"], 3), round(val_tot, 2)])
-            verifier_reequilibrage(bot, p_cex, now_str)
 
     except Exception:
         pass
 
-print(f"\n=== DÉMARRAGE DU TEST RÉALISTE 24H (2 000 $ TOTAL | MISES 110 $ | SANS SHORT) ===", flush=True)
+print(f"\n=== DÉMARRAGE DU TEST RÉALISTE 24H (2 000 $ | MISES 110 $ | SANS TRANSFERT PAYANT) ===", flush=True)
 end_time = time.time() + (DUREE_MINUTES * 60)
 last_report = time.time()
 
@@ -266,7 +228,8 @@ for b in bots:
     val_b = b["cex_usdc"] + b["dex_usdc"] + (b["cex_token"] + b["dex_token"]) * b["prix_actuel"]
     gain_pur_final += b["gain_arbitrage_pur"]
     val_portefeuille_final += val_b
-    print(f"{b['cfg']['nom']:<10} | Gain Pur: {b['gain_arbitrage_pur']:+6.2f} $ | Portefeuille: {val_b:7.2f} $ | Trades: {b['trades_ok']}W / {b['echecs_mev']}L | Rééquilibrages: {b['rebalancements']} | Frais: {b['frais_payes']:.2f} $", flush=True)
+    print(f"{b['cfg']['nom']:<10} | Gain Pur: {b['gain_arbitrage_pur']:+6.2f} $ | Portefeuille: {val_b:7.2f} $ | Trades: {b['trades_ok']}W / {b['echecs_mev']}L | Frais: {b['frais_payes']:.2f} $", flush=True)
 
 print(f"\nGAIN PUR DE L'ARBITRAGE (24H, TOUS FRAIS DÉDUITS) : {gain_pur_final:+.2f} $")
 print(f"VALEUR TOTALE DU PORTEFEUILLE (2 000 $ DÉPART)     : {val_portefeuille_final:.2f} $")
+            
