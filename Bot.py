@@ -110,7 +110,7 @@ for cfg in ACTIFS_CIBLES:
         "pause_jusqua": 0.0
     })
     print(f"PRÊT {cfg['nom']:<10} | Capital: 1000.00 $ (250$ USDC + {qty_init:.4f} {cfg['nom'].split('-')} par côté)", flush=True)
-  LOG_CSV = "simulation_propre_2000.csv"
+LOG_CSV = "simulation_propre_2000.csv"
 with open(LOG_CSV, "w", newline="") as f:
     csv.writer(f).writerow(["date_heure", "actif", "action", "gain_net_trade", "gain_arb_cumule", "valeur_portefeuille"])
 
