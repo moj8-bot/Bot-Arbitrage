@@ -18,8 +18,8 @@ CEX_HOST = "".join(["api", ".", "coinbase", ".", "com"])
 GECKO_HOST = "".join(["api", ".", "geckoterminal", ".", "com"])
 
 ACTIFS_CIBLES = [
-    {"nom": "ETH-USDC", "cb": "ETH-USD", "q": "WETH USDC", "pool_fee": 0.0005, "slip": 0.0005, "s_base": 0.0020, "s_skew": 0.0015},
-    {"nom": "SOL-USDC", "cb": "SOL-USD", "q": "SOL USDC",  "pool_fee": 0.0005, "slip": 0.0006, "s_base": 0.0021, "s_skew": 0.0016}
+    {"nom": "ETH-USDC", "cb": "ETH-USD", "q": "WETH USDC", "pool_fee": 0.0005, "slip": 0.0005, "s_base": 0.0023, "s_skew": 0.0019},
+    {"nom": "SOL-USDC", "cb": "SOL-USD", "q": "SOL USDC",  "pool_fee": 0.0005, "slip": 0.0006, "s_base": 0.0024, "s_skew": 0.0020}
 ]
 
 RPC_LIST = [
