@@ -69,7 +69,7 @@ def lire_prix_dex(contract, prix_ref):
     return min(candidats, key=lambda x: abs(x - prix_ref))
 
 def trouver_pool_valide(query, prix_cex_ref):
-        url = "https://" + "".join(["api", ".", "geckoterminal", ".", "com", "/", "api", "/", "v2", "/", "search", "/", "pools", "?", "query", "="]) + f"{query}&network=base"
+    url = "https://" + "".join(["api", ".", "geckoterminal", ".", "com", "/", "api", "/", "v2", "/", "search", "/", "pools", "?", "query", "="]) + f"{query}&network=base"
     res = requests.get(url, timeout=6).json().get("data", [])
     for item in res:
         attrs = item.get("attributes", {})
