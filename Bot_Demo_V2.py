@@ -26,7 +26,6 @@ CEX_HOST = "".join(["api", ".", "coinbase", ".", "com"])
 TEST_HOST = "".join(["testnet", ".", "binance", ".", "vision"])
 SEPOLIA_RPC = "https://" + "".join(["sepolia", ".", "base", ".", "org"])
 
-# Adresses officielles Base Mainnet (Uniswap v3 QuoterV2 & jetons)
 QUOTER_V2_ADDR = Web3.to_checksum_address("0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a")
 USDC_BASE = Web3.to_checksum_address("0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913")
 WETH_BASE = Web3.to_checksum_address("0x4200000000000000000000000000000000000006")
@@ -70,12 +69,14 @@ def lire_prix_cex(cb_pair):
 def quote_achat_dex(token_addr, dec, fee, usdc_in):
     amt_in = int(usdc_in * 10**6)
     res = quoter.functions.quoteExactInputSingle((USDC_BASE, token_addr, amt_in, fee, 0)).call()
-    return res[0] / (10**dec)
+    val = res[0] if isinstance(res, (list, tuple)) else res
+    return val / (10**dec)
 
 def quote_vente_dex(token_addr, dec, fee, token_in):
     amt_in = int(token_in * (10**dec))
     res = quoter.functions.quoteExactInputSingle((token_addr, USDC_BASE, amt_in, fee, 0)).call()
-    return res[0] / 10**6
+    val = res[0] if isinstance(res, (list, tuple)) else res
+    return val / 10**6
 
 def executer_ordre_binance_testnet(symbol, side, qty):
     if not BINANCE_KEY or not BINANCE_SECRET:
@@ -117,17 +118,26 @@ def executer_tx_sepolia():
 bots = []
 for cfg in ACTIFS_CIBLES:
     p_init = lire_prix_cex(cfg["cb"])
-    qty_test = quote_achat_dex(cfg["token"], cfg["dec"], cfg["fee"], MISE_PAR_TRADE)
-    p_dex_init = MISE_PAR_TRADE / qty_test
+    qty_test = 0
+    for f_test in (100, 500, 3000, 10000):
+        try:
+            q = quote_achat_dex(cfg["token"], cfg["dec"], f_test, MISE_PAR_TRADE)
+            if q > 0 and abs((MISE_PAR_TRADE / q) - p_init) / p_init < 0.03:
+                cfg["fee"] = f_test
+                qty_test = q
+                break
+        except Exception:
+            continue
+    p_dex_init = (MISE_PAR_TRADE / qty_test) if qty_test > 0 else p_init
     qty_init = 250.0 / p_init
     bots.append({
-        "cfg": cfg,
+        "cfg": cfg, "actif_quoter": qty_test > 0,
         "cex_usdc": 250.0, "cex_token": qty_init,
         "dex_usdc": 250.0, "dex_token": qty_init,
         "prix_actuel": p_init,
         "trades_ok": 0, "annules_quoter": 0, "gain_arbitrage_pur": 0.0, "pause_jusqua": 0.0
     })
-    print(f"PRÊT {cfg['nom']:<10} | CEX: {p_init:.2f}$ | Prix Réel QuoterV2 (pour 210$): {p_dex_init:.2f}$", flush=True)
+    print(f"PRÊT {cfg['nom']:<10} | CEX: {p_init:.2f}$ | QuoterV2 (fee={cfg['fee']}): {p_dex_init:.2f}$", flush=True)
 
 LOG_CSV = "journal_demo_v2_quoter.csv"
 with open(LOG_CSV, "w", newline="") as f:
@@ -135,14 +145,13 @@ with open(LOG_CSV, "w", newline="") as f:
 
 def check_single_bot(bot):
     cfg = bot["cfg"]
-    if time.time() < bot["pause_jusqua"]:
+    if not bot["actif_quoter"] or time.time() < bot["pause_jusqua"]:
         return
     try:
         p_cex = lire_prix_cex(cfg["cb"])
         qty_est = MISE_PAR_TRADE / p_cex
         bot["prix_actuel"] = p_cex
 
-        # Interrogation directe du contrat QuoterV2 (prix net exact après frais de pool et glissement)
         qty_recue_dex = quote_achat_dex(cfg["token"], cfg["dec"], cfg["fee"], MISE_PAR_TRADE)
         usdc_recu_dex = quote_vente_dex(cfg["token"], cfg["dec"], cfg["fee"], qty_est)
 
@@ -162,7 +171,6 @@ def check_single_bot(bot):
         bn_id = "-"
         tx_id = "-"
 
-        # Signal A : Achat DEX (USDC -> Token) / Vente CEX
         if spread_a > seuil_a and bot["dex_usdc"] >= MISE_PAR_TRADE and bot["cex_token"] >= qty_recue_dex:
             bot["pause_jusqua"] = time.time() + COOLDOWN_SECONDES
             time.sleep(0.4)
@@ -187,7 +195,6 @@ def check_single_bot(bot):
                 bot["annules_quoter"] += 1
                 action = "ANNULÉ QUOTER (0.000 $ gas)"
 
-        # Signal B : Achat CEX / Vente DEX (Token -> USDC)
         elif spread_v > seuil_v and bot["cex_usdc"] >= MISE_PAR_TRADE and bot["dex_token"] >= qty_est:
             bot["pause_jusqua"] = time.time() + COOLDOWN_SECONDES
             time.sleep(0.4)
