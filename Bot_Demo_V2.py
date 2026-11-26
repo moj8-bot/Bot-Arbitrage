@@ -26,7 +26,6 @@ CEX_HOST = "".join(["api", ".", "coinbase", ".", "com"])
 TEST_HOST = "".join(["testnet", ".", "binance", ".", "vision"])
 SEPOLIA_RPC = "https://" + "".join(["sepolia", ".", "base", ".", "org"])
 
-# Smart contracts Quoter officiels sur Base Mainnet (Uniswap v3 + Aerodrome Slipstream)
 UNI_QUOTER_ADDR  = Web3.to_checksum_address("0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a")
 AERO_QUOTER_ADDR = Web3.to_checksum_address("0x254cF9E1E6e233aa1AC962CB9B05b2cfeAaE15b0")
 
@@ -36,7 +35,7 @@ SOL_BASE  = Web3.to_checksum_address("0x311935Cd80B76769bF2ecC9D8Ab7635b2139cf82
 
 ACTIFS_CIBLES = [
     {"nom": "ETH-USDC", "dex": "UNI",  "cb": "ETH-USD", "sym_bn": "ETHUSDT", "token": WETH_BASE, "dec": 18, "param": 100, "s_base": 0.0013, "s_skew": 0.0011},
-    {"nom": "SOL-USDC", "dex": "AERO", "cb": "SOL-USD", "sym_bn": "SOLUSDT", "token": SOL_BASE,  "dec": 9,  "param": 100, "s_base": 0.0014, "s_skew": 0.0012}
+    {"nom": "SOL-USDC", "dex": "AERO", "cb": "SOL-USD", "sym_bn": "SOLUSDT", "token": SOL_BASE,  "dec": 9,  "param": 10,  "s_base": 0.0014, "s_skew": 0.0012}
 ]
 
 UNI_ABI = [{
@@ -93,14 +92,14 @@ def quote_achat_dex(dex_type, token_addr, dec, param, usdc_in):
     amt_in = int(usdc_in * 10**6)
     q_contract = uni_quoter if dex_type == "UNI" else aero_quoter
     res = q_contract.functions.quoteExactInputSingle((USDC_BASE, token_addr, amt_in, param, 0)).call()
-    val = res[0] if isinstance(res, (list, tuple)) else res
+    val = res if isinstance(res, (list, tuple)) else res
     return val / (10**dec)
 
 def quote_vente_dex(dex_type, token_addr, dec, param, token_in):
     amt_in = int(token_in * (10**dec))
     q_contract = uni_quoter if dex_type == "UNI" else aero_quoter
     res = q_contract.functions.quoteExactInputSingle((token_addr, USDC_BASE, amt_in, param, 0)).call()
-    val = res[0] if isinstance(res, (list, tuple)) else res
+    val = res if isinstance(res, (list, tuple)) else res
     return val / 10**6
 
 def executer_ordre_binance_testnet(symbol, side, qty):
@@ -144,7 +143,7 @@ bots = []
 for cfg in ACTIFS_CIBLES:
     p_init = lire_prix_cex(cfg["cb"])
     qty_test = 0
-    candidats = (100, 500, 3000) if cfg["dex"] == "UNI" else (1, 50, 100, 200)
+    candidats = (100, 500, 3000) if cfg["dex"] == "UNI" else (1, 10, 50, 100, 200)
     for p_test in candidats:
         try:
             q = quote_achat_dex(cfg["dex"], cfg["token"], cfg["dec"], p_test, MISE_PAR_TRADE)
@@ -253,21 +252,30 @@ def check_single_bot(bot):
     except Exception:
         pass
 
-print("\n=== DÉMARRAGE ROBOT DEMO V2 (UNISWAP + AERODROME + QUOTER + 0.35s) ===", flush=True)
+print("\n=== DÉMARRAGE ROBOT DEMO V2 (UNISWAP + AERODROME + QUOTER + SCAN 3 MIN) ===", flush=True)
 end_time = time.time() + (DUREE_MINUTES * 60)
-last_report = time.time()
+last_live = 0.0
 
 while time.time() < end_time:
     with ThreadPoolExecutor(max_workers=2) as executor:
         executor.map(check_single_bot, bots)
-    if time.time() - last_report >= 1800:
-        now_s = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        tot = sum(b["gain_arbitrage_pur"] for b in bots)
-        print(f"\n[{now_s}] POINT 30 MIN -> Gain Pur Cumulé : {tot:+.2f} $\n", flush=True)
-        last_report = time.time()
+    if time.time() - last_live >= 180:
+        now_l = datetime.now().strftime("%H:%M:%S")
+        etats = []
+        for b in bots:
+            try:
+                p_c = lire_prix_cex(b["cfg"]["cb"])
+                q_a = quote_achat_dex(b["cfg"]["dex"], b["cfg"]["token"], b["cfg"]["dec"], b["cfg"]["param"], MISE_PAR_TRADE)
+                sp = ((p_c - (MISE_PAR_TRADE / q_a)) / (MISE_PAR_TRADE / q_a)) * 100
+                etats.append(f"{b['cfg']['nom']}: {sp:+.3f}% (Cumul: {b['gain_arbitrage_pur']:+.2f}$)")
+            except Exception:
+                pass
+        print(f"[{now_l}] SCAN 3 MIN -> {' | '.join(etats)}", flush=True)
+        last_live = time.time()
     time.sleep(0.35)
 
 print("\n================ BILAN FINAL DEMO V2 (UNISWAP + AERODROME) ================", flush=True)
 for b in bots:
     val_b = b["cex_usdc"] + b["dex_usdc"] + (b["cex_token"] + b["dex_token"]) * b["prix_actuel"]
     print(f"{b['cfg']['nom']:<10} | Gain Pur: {b['gain_arbitrage_pur']:+6.2f} $ | Portefeuille: {val_b:7.2f} $ | Trades: {b['trades_ok']}W / Annulés Quoter: {b['annules_quoter']}", flush=True)
+    
