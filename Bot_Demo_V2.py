@@ -35,7 +35,7 @@ SOL_BASE  = Web3.to_checksum_address("0x311935Cd80B76769bF2ecC9D8Ab7635b2139cf82
 
 ACTIFS_CIBLES = [
     {"nom": "ETH-USDC", "dex": "UNI",  "cb": "ETH-USD", "sym_bn": "ETHUSDT", "token": WETH_BASE, "dec": 18, "param": 100, "s_base": 0.0013, "s_skew": 0.0011},
-    {"nom": "SOL-USDC", "dex": "AERO", "cb": "SOL-USD", "sym_bn": "SOLUSDT", "token": SOL_BASE,  "dec": 9,  "param": 10,  "s_base": 0.0014, "s_skew": 0.0012}
+    {"nom": "SOL-USDC", "dex": "AERO", "cb": "SOL-USD", "sym_bn": "SOLUSDT", "token": SOL_BASE,  "dec": 9,  "param": 100, "s_base": 0.0014, "s_skew": 0.0012}
 ]
 
 UNI_ABI = [{
@@ -143,8 +143,7 @@ bots = []
 for cfg in ACTIFS_CIBLES:
     p_init = lire_prix_cex(cfg["cb"])
     qty_test = 0
-    candidats = (100, 500, 3000) if cfg["dex"] == "UNI" else (1, 10, 50, 100, 200)
-    for p_test in candidats:
+    for p_test in (100,):
         try:
             q = quote_achat_dex(cfg["dex"], cfg["token"], cfg["dec"], p_test, MISE_PAR_TRADE)
             if q > 0 and abs((MISE_PAR_TRADE / q) - p_init) / p_init < 0.03:
@@ -278,4 +277,3 @@ print("\n================ BILAN FINAL DEMO V2 (UNISWAP + AERODROME) ============
 for b in bots:
     val_b = b["cex_usdc"] + b["dex_usdc"] + (b["cex_token"] + b["dex_token"]) * b["prix_actuel"]
     print(f"{b['cfg']['nom']:<10} | Gain Pur: {b['gain_arbitrage_pur']:+6.2f} $ | Portefeuille: {val_b:7.2f} $ | Trades: {b['trades_ok']}W / Annulés Quoter: {b['annules_quoter']}", flush=True)
-                    
