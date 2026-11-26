@@ -35,8 +35,8 @@ WETH_BASE = Web3.to_checksum_address("0x4200000000000000000000000000000000000006
 SOL_BASE  = Web3.to_checksum_address("0x311935Cd80B76769bF2ecC9D8Ab7635b2139cf82")
 
 ACTIFS_CIBLES = [
-    {"nom": "ETH-USDC", "dex": "UNI",  "cb": "ETH-USD", "sym_bn": "ETHUSDT", "token": WETH_BASE, "dec": 18, "param": 100, "s_base": 0.0023, "s_skew": 0.0020},
-    {"nom": "SOL-USDC", "dex": "AERO", "cb": "SOL-USD", "sym_bn": "SOLUSDT", "token": SOL_BASE,  "dec": 9,  "param": 100, "s_base": 0.0024, "s_skew": 0.0021}
+    {"nom": "ETH-USDC", "dex": "UNI",  "cb": "ETH-USD", "sym_bn": "ETHUSDT", "token": WETH_BASE, "dec": 18, "param": 100, "s_base": 0.0013, "s_skew": 0.0011},
+    {"nom": "SOL-USDC", "dex": "AERO", "cb": "SOL-USD", "sym_bn": "SOLUSDT", "token": SOL_BASE,  "dec": 9,  "param": 100, "s_base": 0.0014, "s_skew": 0.0012}
 ]
 
 UNI_ABI = [{
