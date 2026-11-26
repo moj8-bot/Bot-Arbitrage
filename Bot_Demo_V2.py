@@ -92,14 +92,14 @@ def quote_achat_dex(dex_type, token_addr, dec, param, usdc_in):
     amt_in = int(usdc_in * 10**6)
     q_contract = uni_quoter if dex_type == "UNI" else aero_quoter
     res = q_contract.functions.quoteExactInputSingle((USDC_BASE, token_addr, amt_in, param, 0)).call()
-    val = res if isinstance(res, (list, tuple)) else res
+    val = int(next(iter(res)))
     return val / (10**dec)
 
 def quote_vente_dex(dex_type, token_addr, dec, param, token_in):
     amt_in = int(token_in * (10**dec))
     q_contract = uni_quoter if dex_type == "UNI" else aero_quoter
     res = q_contract.functions.quoteExactInputSingle((token_addr, USDC_BASE, amt_in, param, 0)).call()
-    val = res if isinstance(res, (list, tuple)) else res
+    val = int(next(iter(res)))
     return val / 10**6
 
 def executer_ordre_binance_testnet(symbol, side, qty):
@@ -278,4 +278,4 @@ print("\n================ BILAN FINAL DEMO V2 (UNISWAP + AERODROME) ============
 for b in bots:
     val_b = b["cex_usdc"] + b["dex_usdc"] + (b["cex_token"] + b["dex_token"]) * b["prix_actuel"]
     print(f"{b['cfg']['nom']:<10} | Gain Pur: {b['gain_arbitrage_pur']:+6.2f} $ | Portefeuille: {val_b:7.2f} $ | Trades: {b['trades_ok']}W / Annulés Quoter: {b['annules_quoter']}", flush=True)
-    
+                    
