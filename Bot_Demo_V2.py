@@ -26,16 +26,16 @@ CEX_HOST = "".join(["api", ".", "coinbase", ".", "com"])
 TEST_HOST = "".join(["testnet", ".", "binance", ".", "vision"])
 SEPOLIA_RPC = "https://" + "".join(["sepolia", ".", "base", ".", "org"])
 
-UNI_QUOTER_ADDR  = Web3.to_checksum_address("0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a")
-AERO_QUOTER_ADDR = Web3.to_checksum_address("0x254cF9E1E6e233aa1AC962CB9B05b2cfeAaE15b0")
+UNI_QUOTER_ADDR = Web3.to_checksum_address("0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a")
 
-USDC_BASE = Web3.to_checksum_address("0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913")
-WETH_BASE = Web3.to_checksum_address("0x4200000000000000000000000000000000000006")
-SOL_BASE  = Web3.to_checksum_address("0x311935Cd80B76769bF2ecC9D8Ab7635b2139cf82")
+USDC_BASE  = Web3.to_checksum_address("0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913")
+WETH_BASE  = Web3.to_checksum_address("0x4200000000000000000000000000000000000006")
+CBBTC_BASE = Web3.to_checksum_address("0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf")
 
+# Duo natif Base à très bas frais : ETH-USDC (0.01% = 100) et cbBTC-USDC (0.05% = 500)
 ACTIFS_CIBLES = [
-    {"nom": "ETH-USDC", "dex": "UNI",  "cb": "ETH-USD", "sym_bn": "ETHUSDT", "token": WETH_BASE, "dec": 18, "param": 100, "s_base": 0.0013, "s_skew": 0.0011},
-    {"nom": "SOL-USDC", "dex": "AERO", "cb": "SOL-USD", "sym_bn": "SOLUSDT", "token": SOL_BASE,  "dec": 9,  "param": 100, "s_base": 0.0014, "s_skew": 0.0012}
+    {"nom": "ETH-USDC", "cb": "ETH-USD", "sym_bn": "ETHUSDT", "token": WETH_BASE,  "dec": 18, "fee": 100, "s_base": 0.0013, "s_skew": 0.0011},
+    {"nom": "BTC-USDC", "cb": "BTC-USD", "sym_bn": "BTCUSDT", "token": CBBTC_BASE, "dec": 8,  "fee": 500, "s_base": 0.0014, "s_skew": 0.0012}
 ]
 
 UNI_ABI = [{
@@ -57,48 +57,26 @@ UNI_ABI = [{
     "type": "function"
 }]
 
-AERO_ABI = [{
-    "inputs": [{"components": [
-        {"internalType": "address", "name": "tokenIn", "type": "address"},
-        {"internalType": "address", "name": "tokenOut", "type": "address"},
-        {"internalType": "uint256", "name": "amountIn", "type": "uint256"},
-        {"internalType": "int24", "name": "tickSpacing", "type": "int24"},
-        {"internalType": "uint160", "name": "sqrtPriceLimitX96", "type": "uint160"}
-    ], "internalType": "struct IQuoterV2.QuoteExactInputSingleParams", "name": "params", "type": "tuple"}],
-    "name": "quoteExactInputSingle",
-    "outputs": [
-        {"internalType": "uint256", "name": "amountOut", "type": "uint256"},
-        {"internalType": "uint160", "name": "sqrtPriceX96After", "type": "uint160"},
-        {"internalType": "uint32", "name": "initializedTicksCrossed", "type": "uint32"},
-        {"internalType": "uint256", "name": "gasEstimate", "type": "uint256"}
-    ],
-    "stateMutability": "nonpayable",
-    "type": "function"
-}]
-
 rpc_actif = ALCHEMY_URL if ALCHEMY_URL.startswith("http") else "https://" + "".join(["base", "-", "rpc", ".", "publicnode", ".", "com"])
 w3_main = Web3(Web3.HTTPProvider(rpc_actif, request_kwargs={'timeout': 4}))
 w3_sepolia = Web3(Web3.HTTPProvider(SEPOLIA_RPC, request_kwargs={'timeout': 4}))
-uni_quoter  = w3_main.eth.contract(address=UNI_QUOTER_ADDR, abi=UNI_ABI)
-aero_quoter = w3_main.eth.contract(address=AERO_QUOTER_ADDR, abi=AERO_ABI)
-print(f"Nœud Alchemy connecté : {w3_main.is_connected()} | Double Quoter (Uniswap + Aerodrome) prêt", flush=True)
+uni_quoter = w3_main.eth.contract(address=UNI_QUOTER_ADDR, abi=UNI_ABI)
+print(f"Nœud Alchemy connecté : {w3_main.is_connected()} | Uniswap v3 QuoterV2 (ETH + cbBTC) prêt", flush=True)
 
 
 def lire_prix_cex(cb_pair):
     r = requests.get(f"https://{CEX_HOST}/v2/prices/{cb_pair}/spot", timeout=3).json()
     return float(r["data"]["amount"])
 
-def quote_achat_dex(dex_type, token_addr, dec, param, usdc_in):
+def quote_achat_dex(token_addr, dec, fee, usdc_in):
     amt_in = int(usdc_in * 10**6)
-    q_contract = uni_quoter if dex_type == "UNI" else aero_quoter
-    res = q_contract.functions.quoteExactInputSingle((USDC_BASE, token_addr, amt_in, param, 0)).call()
+    res = uni_quoter.functions.quoteExactInputSingle((USDC_BASE, token_addr, amt_in, fee, 0)).call()
     val = int(next(iter(res)))
     return val / (10**dec)
 
-def quote_vente_dex(dex_type, token_addr, dec, param, token_in):
+def quote_vente_dex(token_addr, dec, fee, token_in):
     amt_in = int(token_in * (10**dec))
-    q_contract = uni_quoter if dex_type == "UNI" else aero_quoter
-    res = q_contract.functions.quoteExactInputSingle((token_addr, USDC_BASE, amt_in, param, 0)).call()
+    res = uni_quoter.functions.quoteExactInputSingle((token_addr, USDC_BASE, amt_in, fee, 0)).call()
     val = int(next(iter(res)))
     return val / 10**6
 
@@ -110,7 +88,7 @@ def executer_ordre_binance_testnet(symbol, side, qty):
             "symbol": symbol,
             "side": side,
             "type": "MARKET",
-            "quantity": f"{qty:.3f}",
+            "quantity": f"{qty:.4f}",
             "timestamp": int(time.time() * 1000)
         }
         query_str = urlencode(params)
@@ -143,11 +121,11 @@ bots = []
 for cfg in ACTIFS_CIBLES:
     p_init = lire_prix_cex(cfg["cb"])
     qty_test = 0
-    for p_test in (100,):
+    for f_test in (100, 500):
         try:
-            q = quote_achat_dex(cfg["dex"], cfg["token"], cfg["dec"], p_test, MISE_PAR_TRADE)
+            q = quote_achat_dex(cfg["token"], cfg["dec"], f_test, MISE_PAR_TRADE)
             if q > 0 and abs((MISE_PAR_TRADE / q) - p_init) / p_init < 0.03:
-                cfg["param"] = p_test
+                cfg["fee"] = f_test
                 qty_test = q
                 break
         except Exception:
@@ -161,9 +139,10 @@ for cfg in ACTIFS_CIBLES:
         "prix_actuel": p_init,
         "trades_ok": 0, "annules_quoter": 0, "gain_arbitrage_pur": 0.0, "pause_jusqua": 0.0
     })
-    print(f"PRÊT {cfg['nom']:<10} [{cfg['dex']}] | CEX: {p_init:.2f}$ | Quoter (p={cfg['param']}): {p_dex_init:.2f}$", flush=True)
+    frais_pct = cfg["fee"] / 10000.0
+    print(f"PRÊT {cfg['nom']:<10} [UNI {frais_pct:.2f}%] | CEX: {p_init:.2f}$ | QuoterV2: {p_dex_init:.2f}$", flush=True)
 
-LOG_CSV = "journal_demo_v2_quoter.csv"
+LOG_CSV = "journal_demo_v2_eth_btc.csv"
 with open(LOG_CSV, "w", newline="") as f:
     csv.writer(f).writerow(["date_heure", "actif", "action", "binance_order_id", "sepolia_tx", "gain_net", "gain_cumule"])
 
@@ -176,8 +155,8 @@ def check_single_bot(bot):
         qty_est = MISE_PAR_TRADE / p_cex
         bot["prix_actuel"] = p_cex
 
-        qty_recue_dex = quote_achat_dex(cfg["dex"], cfg["token"], cfg["dec"], cfg["param"], MISE_PAR_TRADE)
-        usdc_recu_dex = quote_vente_dex(cfg["dex"], cfg["token"], cfg["dec"], cfg["param"], qty_est)
+        qty_recue_dex = quote_achat_dex(cfg["token"], cfg["dec"], cfg["fee"], MISE_PAR_TRADE)
+        usdc_recu_dex = quote_vente_dex(cfg["token"], cfg["dec"], cfg["fee"], qty_est)
 
         p_achat_dex_net = MISE_PAR_TRADE / qty_recue_dex
         p_vente_dex_net = usdc_recu_dex / qty_est
@@ -199,7 +178,7 @@ def check_single_bot(bot):
             bot["pause_jusqua"] = time.time() + COOLDOWN_SECONDES
             time.sleep(0.4)
             p_cex_2 = lire_prix_cex(cfg["cb"])
-            qty_recue_2 = quote_achat_dex(cfg["dex"], cfg["token"], cfg["dec"], cfg["param"], MISE_PAR_TRADE)
+            qty_recue_2 = quote_achat_dex(cfg["token"], cfg["dec"], cfg["fee"], MISE_PAR_TRADE)
 
             gain_cex = qty_recue_2 * p_cex_2 * (1.0 - FRAIS_CEX_REEL)
             profit_net = gain_cex - MISE_PAR_TRADE - GAS_BASE_USDC
@@ -224,7 +203,7 @@ def check_single_bot(bot):
             time.sleep(0.4)
             p_cex_2 = lire_prix_cex(cfg["cb"])
             qty_cex_2 = MISE_PAR_TRADE / p_cex_2
-            usdc_recu_2 = quote_vente_dex(cfg["dex"], cfg["token"], cfg["dec"], cfg["param"], qty_cex_2)
+            usdc_recu_2 = quote_vente_dex(cfg["token"], cfg["dec"], cfg["fee"], qty_cex_2)
 
             cout_cex = MISE_PAR_TRADE * (1.0 + FRAIS_CEX_REEL)
             profit_net = usdc_recu_2 - cout_cex - GAS_BASE_USDC
@@ -251,7 +230,7 @@ def check_single_bot(bot):
     except Exception:
         pass
 
-print("\n=== DÉMARRAGE ROBOT DEMO V2 (UNISWAP + AERODROME + QUOTER + SCAN 3 MIN) ===", flush=True)
+print("\n=== DÉMARRAGE ROBOT DEMO V2 (ETH-USDC 0.01% + cbBTC-USDC 0.05% + QUOTER) ===", flush=True)
 end_time = time.time() + (DUREE_MINUTES * 60)
 last_live = 0.0
 
@@ -264,7 +243,7 @@ while time.time() < end_time:
         for b in bots:
             try:
                 p_c = lire_prix_cex(b["cfg"]["cb"])
-                q_a = quote_achat_dex(b["cfg"]["dex"], b["cfg"]["token"], b["cfg"]["dec"], b["cfg"]["param"], MISE_PAR_TRADE)
+                q_a = quote_achat_dex(b["cfg"]["token"], b["cfg"]["dec"], b["cfg"]["fee"], MISE_PAR_TRADE)
                 sp = ((p_c - (MISE_PAR_TRADE / q_a)) / (MISE_PAR_TRADE / q_a)) * 100
                 etats.append(f"{b['cfg']['nom']}: {sp:+.3f}% (Cumul: {b['gain_arbitrage_pur']:+.2f}$)")
             except Exception:
@@ -273,7 +252,8 @@ while time.time() < end_time:
         last_live = time.time()
     time.sleep(0.35)
 
-print("\n================ BILAN FINAL DEMO V2 (UNISWAP + AERODROME) ================", flush=True)
+print("\n================ BILAN FINAL DEMO V2 (ETH + cbBTC) ================", flush=True)
 for b in bots:
     val_b = b["cex_usdc"] + b["dex_usdc"] + (b["cex_token"] + b["dex_token"]) * b["prix_actuel"]
     print(f"{b['cfg']['nom']:<10} | Gain Pur: {b['gain_arbitrage_pur']:+6.2f} $ | Portefeuille: {val_b:7.2f} $ | Trades: {b['trades_ok']}W / Annulés Quoter: {b['annules_quoter']}", flush=True)
+    
