@@ -25,9 +25,7 @@ UNI_QUOTER_ADDR = Web3.to_checksum_address("0x3d4e44Eb1374240CE5F1B871ab261CD163
 USDC_BASE = Web3.to_checksum_address("0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913")
 WETH_BASE = Web3.to_checksum_address("0x4200000000000000000000000000000000000006")
 
-ACTIFS_CIBLES = [
-    {"nom": "ETH-USDC", "hl": "ETH", "token": WETH_BASE, "dec": 18, "fee": 100, "s_base": 0.00075, "s_skew": 0.00065}
-]
+CFG_ETH = {"nom": "ETH-USDC", "hl": "ETH", "token": WETH_BASE, "dec": 18, "fee": 100, "s_base": 0.00075, "s_skew": 0.00065}
 
 UNI_ABI = [{
     "inputs": [{"components": [
@@ -89,7 +87,7 @@ def executer_tx_sepolia():
     except Exception:
         return "TX_TEST_OK"
 
-cfg = ACTIFS_CIBLES
+cfg = CFG_ETH
 p_init = lire_prix_hyperliquid(cfg["hl"])
 qty_test = quote_achat_dex(cfg["token"], cfg["dec"], cfg["fee"], 250.0)
 p_dex_init = 250.0 / qty_test
