@@ -72,7 +72,7 @@ print(f"Connexion Base OK : {w3_main.is_connected()} | Port Render {port_render}
 
 def lire_prix_okx(inst_id):
     r = requests.get(f"https://{OKX_HOST}/api/v5/market/ticker?instId={inst_id}", timeout=3).json()
-    return float(r["data"]["last"])
+    return float(next(iter(r["data"]))["last"])
 
 def quote_achat_dex(token_addr, dec, fee, usdc_in):
     amt_in = int(usdc_in * 10**6)
