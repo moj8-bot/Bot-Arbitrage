@@ -3,7 +3,6 @@ import time
 import csv
 import requests
 from datetime import datetime
-from concurrent.futures import ThreadPoolExecutor
 from web3 import Web3
 
 ALCHEMY_URL = os.environ.get("ALCHEMY_MAINNET", "").strip()
@@ -12,8 +11,9 @@ WALLET_TEST_ADDR = "0xF9C78D9a367B444422868101A60B7fBA12f2c144"
 WALLET_TEST_PRIV = "7cc45b8f9ccb447b79b2a2eb240436244bfebe3c82f24c960f68577f4e6799d6"
 
 DUREE_MINUTES = 1440
-MISE_PAR_TRADE = 210.0
-FRAIS_HL_TAKER = 0.00035  # 0.035% frais Taker réels sur Hyperliquid
+CAPITAL_PAR_POCHE = 500.0  # 4 poches x 500$ = 2 000$ concentrés à 100% sur ETH-USDC
+MISE_PAR_TRADE = 420.0     # Mises doublées à 420$ (glissement quasi nul sur pool 50M$)
+FRAIS_HL_TAKER = 0.00035   # 0.035% frais Taker réels sur Hyperliquid
 GAS_BASE_USDC = 0.03
 COOLDOWN_SECONDES = 15.0
 
@@ -21,15 +21,12 @@ HL_HOST = "".join(["api", ".", "hyperliquid", ".", "xyz"])
 SEPOLIA_RPC = "https://" + "".join(["sepolia", ".", "base", ".", "org"])
 
 UNI_QUOTER_ADDR = Web3.to_checksum_address("0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a")
+USDC_BASE = Web3.to_checksum_address("0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913")
+WETH_BASE = Web3.to_checksum_address("0x4200000000000000000000000000000000000006")
 
-USDC_BASE  = Web3.to_checksum_address("0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913")
-WETH_BASE  = Web3.to_checksum_address("0x4200000000000000000000000000000000000006")
-CBBTC_BASE = Web3.to_checksum_address("0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf")
-
-# Seuils calibrés pour frais totaux ultra-bas (0.01% Uniswap + 0.035% Hyperliquid = 0.045%)
+# 100% ETH-USDC (frais totaux 0.045% + gas 0.007% = 0.052% -> seuil rentable dès 0.065%)
 ACTIFS_CIBLES = [
-    {"nom": "ETH-USDC", "hl": "ETH", "token": WETH_BASE,  "dec": 18, "fee": 100, "s_base": 0.0010, "s_skew": 0.0008},
-    {"nom": "BTC-USDC", "hl": "BTC", "token": CBBTC_BASE, "dec": 8,  "fee": 500, "s_base": 0.0011, "s_skew": 0.0009}
+    {"nom": "ETH-USDC", "hl": "ETH", "token": WETH_BASE, "dec": 18, "fee": 100, "s_base": 0.00075, "s_skew": 0.00065}
 ]
 
 UNI_ABI = [{
@@ -55,7 +52,7 @@ rpc_actif = ALCHEMY_URL if ALCHEMY_URL.startswith("http") else "https://" + "".j
 w3_main = Web3(Web3.HTTPProvider(rpc_actif, request_kwargs={'timeout': 4}))
 w3_sepolia = Web3(Web3.HTTPProvider(SEPOLIA_RPC, request_kwargs={'timeout': 4}))
 uni_quoter = w3_main.eth.contract(address=UNI_QUOTER_ADDR, abi=UNI_ABI)
-print(f"Nœud Alchemy connecté : {w3_main.is_connected()} | Uniswap v3 + Hyperliquid (0.035%) prêt", flush=True)
+print(f"Nœud Alchemy connecté : {w3_main.is_connected()} | Mode 100% ETH-USDC (Mises 420$) prêt", flush=True)
 
 
 def lire_prix_hyperliquid(coin):
@@ -92,38 +89,27 @@ def executer_tx_sepolia():
     except Exception:
         return "TX_TEST_OK"
 
-bots = []
-for cfg in ACTIFS_CIBLES:
-    p_init = lire_prix_hyperliquid(cfg["hl"])
-    qty_test = 0
-    for f_test in (100, 500):
-        try:
-            q = quote_achat_dex(cfg["token"], cfg["dec"], f_test, MISE_PAR_TRADE)
-            if q > 0 and abs((MISE_PAR_TRADE / q) - p_init) / p_init < 0.03:
-                cfg["fee"] = f_test
-                qty_test = q
-                break
-        except Exception:
-            continue
-    p_dex_init = (MISE_PAR_TRADE / qty_test) if qty_test > 0 else p_init
-    qty_init = 250.0 / p_init
-    bots.append({
-        "cfg": cfg, "actif_quoter": qty_test > 0,
-        "hl_usdc": 250.0, "hl_token": qty_init,
-        "dex_usdc": 250.0, "dex_token": qty_init,
-        "prix_actuel": p_init,
-        "trades_ok": 0, "annules_quoter": 0, "gain_arbitrage_pur": 0.0, "pause_jusqua": 0.0
-    })
-    frais_pct = cfg["fee"] / 10000.0
-    print(f"PRÊT {cfg['nom']:<10} [UNI {frais_pct:.2f}% + HL 0.035%] | HL: {p_init:.2f}$ | QuoterV2: {p_dex_init:.2f}$", flush=True)
+cfg = ACTIFS_CIBLES[0]
+p_init = lire_prix_hyperliquid(cfg["hl"])
+qty_test = quote_achat_dex(cfg["token"], cfg["dec"], cfg["fee"], MISE_PAR_TRADE)
+p_dex_init = MISE_PAR_TRADE / qty_test
+qty_init = CAPITAL_PAR_POCHE / p_init
 
-LOG_CSV = "journal_demo_hyperliquid.csv"
+bot = {
+    "cfg": cfg,
+    "hl_usdc": CAPITAL_PAR_POCHE, "hl_token": qty_init,
+    "dex_usdc": CAPITAL_PAR_POCHE, "dex_token": qty_init,
+    "prix_actuel": p_init,
+    "trades_ok": 0, "annules_quoter": 0, "gain_arbitrage_pur": 0.0, "pause_jusqua": 0.0
+}
+print(f"PRÊT {cfg['nom']} [UNI 0.01% + HL 0.035% | Capital 2000$ | Mise 420$] | HL: {p_init:.2f}$ | QuoterV2: {p_dex_init:.2f}$", flush=True)
+
+LOG_CSV = "journal_demo_hl_eth420.csv"
 with open(LOG_CSV, "w", newline="") as f:
     csv.writer(f).writerow(["date_heure", "actif", "action", "sepolia_tx", "gain_net", "gain_cumule"])
 
-def check_single_bot(bot):
-    cfg = bot["cfg"]
-    if not bot["actif_quoter"] or time.time() < bot["pause_jusqua"]:
+def check_bot():
+    if time.time() < bot["pause_jusqua"]:
         return
     try:
         p_hl = lire_prix_hyperliquid(cfg["hl"])
@@ -198,36 +184,32 @@ def check_single_bot(bot):
                 action = "ANNULÉ QUOTER (0.000 $ gas)"
 
         if action:
-            print(f"[{now_str}] [{cfg['nom']:<8}] {action} | TX:{tx_id} | Cumul: {bot['gain_arbitrage_pur']:+.2f} $", flush=True)
+            print(f"[{now_str}] [{cfg['nom']}] {action} | TX:{tx_id} | Cumul: {bot['gain_arbitrage_pur']:+.2f} $", flush=True)
             with open(LOG_CSV, "a", newline="") as f:
                 csv.writer(f).writerow([now_str, cfg["nom"], action, tx_id, round(delta_net, 3), round(bot["gain_arbitrage_pur"], 3)])
     except Exception:
         pass
 
-print("\n=== DÉMARRAGE ROBOT DEMO HYPERLIQUID + UNISWAP BASE (FRAIS 0.045% TOTAL) ===", flush=True)
+print("\n=== DÉMARRAGE SNIPER 100% ETH-USDC (MISES 420$ | FRAIS TOTAUX 0.045%) ===", flush=True)
 end_time = time.time() + (DUREE_MINUTES * 60)
 last_live = 0.0
 
 while time.time() < end_time:
-    with ThreadPoolExecutor(max_workers=2) as executor:
-        executor.map(check_single_bot, bots)
+    check_bot()
     if time.time() - last_live >= 180:
         now_l = datetime.now().strftime("%H:%M:%S")
-        etats = []
-        for b in bots:
-            try:
-                p_c = lire_prix_hyperliquid(b["cfg"]["hl"])
-                q_a = quote_achat_dex(b["cfg"]["token"], b["cfg"]["dec"], b["cfg"]["fee"], MISE_PAR_TRADE)
-                sp = ((p_c - (MISE_PAR_TRADE / q_a)) / (MISE_PAR_TRADE / q_a)) * 100
-                etats.append(f"{b['cfg']['nom']}: {sp:+.3f}% (Cumul: {b['gain_arbitrage_pur']:+.2f}$)")
-            except Exception:
-                pass
-        print(f"[{now_l}] SCAN 3 MIN -> {' | '.join(etats)}", flush=True)
+        try:
+            p_c = lire_prix_hyperliquid(cfg["hl"])
+            q_a = quote_achat_dex(cfg["token"], cfg["dec"], cfg["fee"], MISE_PAR_TRADE)
+            q_v = quote_vente_dex(cfg["token"], cfg["dec"], cfg["fee"], MISE_PAR_TRADE / p_c)
+            sp_a = ((p_c - (MISE_PAR_TRADE / q_a)) / (MISE_PAR_TRADE / q_a)) * 100
+            sp_v = (((q_v / (MISE_PAR_TRADE / p_c)) - p_c) / p_c) * 100
+            print(f"[{now_l}] SCAN 3 MIN -> Achat DEX: {sp_a:+.3f}% | Vente DEX: {sp_v:+.3f}% | Cumul: {bot['gain_arbitrage_pur']:+.2f}$ ({bot['trades_ok']}W)", flush=True)
+        except Exception:
+            pass
         last_live = time.time()
     time.sleep(0.35)
 
-print("\n================ BILAN FINAL DEMO HYPERLIQUID + UNISWAP ================", flush=True)
-for b in bots:
-    val_b = b["hl_usdc"] + b["dex_usdc"] + (b["hl_token"] + b["dex_token"]) * b["prix_actuel"]
-    print(f"{b['cfg']['nom']:<10} | Gain Pur: {b['gain_arbitrage_pur']:+6.2f} $ | Portefeuille: {val_b:7.2f} $ | Trades: {b['trades_ok']}W / Annulés Quoter: {b['annules_quoter']}", flush=True)
-                 
+val_b = bot["hl_usdc"] + bot["dex_usdc"] + (bot["hl_token"] + bot["dex_token"]) * bot["prix_actuel"]
+print(f"\nBILAN FINAL -> Gain Pur: {bot['gain_arbitrage_pur']:+6.2f} $ | Portefeuille: {val_b:7.2f} $ | Trades: {bot['trades_ok']}W / Annulés Quoter: {bot['annules_quoter']}", flush=True)
+        
