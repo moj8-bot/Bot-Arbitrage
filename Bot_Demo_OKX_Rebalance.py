@@ -1,26 +1,38 @@
 import os
 import time
 import csv
+import threading
+import http.server
 import requests
 from datetime import datetime
 from web3 import Web3
+
+class PingHandler(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"BOT OKX-BASE ACTIF")
+    def log_message(self, format, *args):
+        pass
+
+port_render = int(os.environ.get("PORT", 10000))
+threading.Thread(target=lambda: http.server.HTTPServer(("0.0.0.0", port_render), PingHandler).serve_forever(), daemon=True).start()
 
 ALCHEMY_URL = os.environ.get("ALCHEMY_MAINNET", "").strip()
 
 WALLET_TEST_ADDR = "0xF9C78D9a367B444422868101A60B7fBA12f2c144"
 WALLET_TEST_PRIV = "7cc45b8f9ccb447b79b2a2eb240436244bfebe3c82f24c960f68577f4e6799d6"
 
-DUREE_MINUTES = 1440
-CAPITAL_TOTAL = 2000.0
+DUREE_MINUTES = 10080      # 7 jours complets en continu (24h/24)
 POCHE_INIT = 500.0         # 4 poches de 500$ (500$ USDC + 500$ ETH sur OKX et Base)
 MISE_MAX_TRADE = 250.0     # Mises de 250$ (2 trades par poche avant rééquilibrage)
 MISE_MIN_TRADE = 100.0
 
-FRAIS_OKX_TAKER = 0.0010   # 0.10% frais Taker réels OKX Europe (avec mode X-Perps)
+FRAIS_OKX_TAKER = 0.0010   # 0.10% frais Taker réels OKX Europe (mode X-Perps)
 GAS_BASE_USDC = 0.03       # 0.03$ gas swap Uniswap Base
 COUT_REBALANCE = 0.05      # 0.05$ coût réel transfert Base <-> OKX
 DELAI_REBALANCE_SEC = 180  # 3 minutes de pause réaliste pendant le transfert Base <-> OKX
-SEUIL_GAIN_REBALANCE = 0.25 # Rééquilibre automatiquement dès qu'une poche tombe sous 100$ et que le cycle est gagnant
+SEUIL_GAIN_REBALANCE = 0.25
 COOLDOWN_SECONDES = 12.0
 
 OKX_HOST = "".join(["www", ".", "okx", ".", "com"])
@@ -30,7 +42,6 @@ UNI_QUOTER_ADDR = Web3.to_checksum_address("0x3d4e44Eb1374240CE5F1B871ab261CD163
 USDC_BASE = Web3.to_checksum_address("0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913")
 WETH_BASE = Web3.to_checksum_address("0x4200000000000000000000000000000000000006")
 
-# Seuils calibrés pour couvrir 0.10% OKX + 0.01% Uniswap + 0.03$ gas
 CFG_ETH = {"nom": "ETH-USDC", "inst": "ETH-USDC", "token": WETH_BASE, "dec": 18, "fee": 100, "s_base": 0.00155, "s_skew": 0.00140}
 
 UNI_ABI = [{
@@ -56,12 +67,12 @@ rpc_actif = ALCHEMY_URL if ALCHEMY_URL.startswith("http") else "https://" + "".j
 w3_main = Web3(Web3.HTTPProvider(rpc_actif, request_kwargs={'timeout': 4}))
 w3_sepolia = Web3(Web3.HTTPProvider(SEPOLIA_RPC, request_kwargs={'timeout': 4}))
 uni_quoter = w3_main.eth.contract(address=UNI_QUOTER_ADDR, abi=UNI_ABI)
-print(f"Connexion Base OK : {w3_main.is_connected()} | OKX Europe (0.10%) + Auto-Rebalance Base (0.05$) prêt", flush=True)
+print(f"Connexion Base OK : {w3_main.is_connected()} | Port Render {port_render} ouvert | OKX Europe (0.10%) prêt", flush=True)
 
 
 def lire_prix_okx(inst_id):
     r = requests.get(f"https://{OKX_HOST}/api/v5/market/ticker?instId={inst_id}", timeout=3).json()
-    return float(r["data"][0]["last"])
+    return float(r["data"]["last"])
 
 def quote_achat_dex(token_addr, dec, fee, usdc_in):
     amt_in = int(usdc_in * 10**6)
@@ -158,7 +169,6 @@ def check_bot():
         mise_exec = 0.0
         tx_id = "-"
 
-        # Signal A : Achat Uniswap Base / Vente OKX Europe
         if mise_a >= MISE_MIN_TRADE:
             qty_recue_dex = quote_achat_dex(cfg["token"], cfg["dec"], cfg["fee"], mise_a)
             p_achat_dex_net = mise_a / qty_recue_dex
@@ -189,7 +199,6 @@ def check_bot():
                     bot["annules_quoter"] += 1
                     action = "ANNULÉ QUOTER (0.000 $ gas)"
 
-        # Signal B : Achat OKX Europe / Vente Uniswap Base
         if not action and mise_v >= MISE_MIN_TRADE:
             qty_est_v = mise_v / p_okx
             usdc_recu_dex = quote_vente_dex(cfg["token"], cfg["dec"], cfg["fee"], qty_est_v)
@@ -252,4 +261,4 @@ while time.time() < end_time:
 
 val_tot = bot["okx_usdc"] + bot["dex_usdc"] + (bot["okx_token"] + bot["dex_token"]) * bot["prix_actuel"]
 print(f"\nBILAN FINAL -> Gain Pur: {bot['gain_arbitrage_pur']:+6.2f} $ | Portefeuille: {val_tot:7.2f} $ | Trades: {bot['trades_ok']}W | Rebalances: {bot['nb_rebalances']}", flush=True)
-      
+                    
