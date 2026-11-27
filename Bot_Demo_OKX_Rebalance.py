@@ -18,7 +18,12 @@ def ajouter_log(ligne):
 ETAT_WEB = {
     "gain": 0.0, "trades": 0, "rebal": 0,
     "dex_usdc": 500.0, "okx_usdc": 500.0,
-    "sp_a": 0.0, "sp_v": 0.0, "statut": "Démarrage..."
+    "sp_a": 0.0, "sp_v": 0.0,
+    "max_a": 0.0, "max_v": 0.0,
+    "sum_pos_a": 0.0, "cnt_pos_a": 0,
+    "sum_pos_v": 0.0, "cnt_pos_v": 0,
+    "jour_courant": datetime.now().strftime("%Y-%m-%d"),
+    "statut": "Démarrage..."
 }
 
 class DashboardHandler(http.server.BaseHTTPRequestHandler):
@@ -26,6 +31,8 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-type", "text/html; charset=utf-8")
         self.end_headers()
+        moy_a = (ETAT_WEB["sum_pos_a"] / ETAT_WEB["cnt_pos_a"]) if ETAT_WEB["cnt_pos_a"] > 0 else 0.0
+        moy_v = (ETAT_WEB["sum_pos_v"] / ETAT_WEB["cnt_pos_v"]) if ETAT_WEB["cnt_pos_v"] > 0 else 0.0
         lignes_html = "".join(f"<div style='padding:6px 0;border-bottom:1px solid #222;font-family:monospace;font-size:13px'>{l}</div>" for l in DERNIERS_LOGS)
         html = f"""<!DOCTYPE html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>
         <meta http-equiv='refresh' content='10'><title>Bot Arbitrage OKX-Base</title></head>
@@ -48,6 +55,14 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
           <div style='background:#161b22;padding:12px;border-radius:8px;border:1px solid #30363d'>
             <div style='color:#8b949e;font-size:12px'>ÉCART DIRECT (A / V)</div>
             <div style='font-size:16px;font-weight:bold'>{ETAT_WEB['sp_a']:+.3f}% / {ETAT_WEB['sp_v']:+.3f}%</div>
+          </div>
+          <div style='background:#161b22;padding:12px;border-radius:8px;border:1px solid #30363d'>
+            <div style='color:#8b949e;font-size:12px'>PIC MAX DU JOUR (A / V)</div>
+            <div style='color:#58a6ff;font-size:16px;font-weight:bold'>{ETAT_WEB['max_a']:+.3f}% / {ETAT_WEB['max_v']:+.3f}%</div>
+          </div>
+          <div style='background:#161b22;padding:12px;border-radius:8px;border:1px solid #30363d'>
+            <div style='color:#8b949e;font-size:12px'>MOYENNE POSITIF (A / V)</div>
+            <div style='color:#d2a8ff;font-size:16px;font-weight:bold'>{moy_a:+.3f}% / {moy_v:+.3f}%</div>
           </div>
         </div>
         <h3 style='font-size:15px;border-bottom:1px solid #30363d;padding-bottom:6px'>Journal en direct (Trades & Scans 3 min)</h3>
@@ -193,8 +208,19 @@ def verifier_rebalance(p_eth):
         return True
     return False
 
+
 def check_bot():
     try:
+        jour_now = datetime.now().strftime("%Y-%m-%d")
+        if jour_now != ETAT_WEB["jour_courant"]:
+            ETAT_WEB["jour_courant"] = jour_now
+            ETAT_WEB["max_a"] = 0.0
+            ETAT_WEB["max_v"] = 0.0
+            ETAT_WEB["sum_pos_a"] = 0.0
+            ETAT_WEB["cnt_pos_a"] = 0
+            ETAT_WEB["sum_pos_v"] = 0.0
+            ETAT_WEB["cnt_pos_v"] = 0
+
         p_okx = lire_prix_okx(cfg["inst"])
         bot["prix_actuel"] = p_okx
         if verifier_rebalance(p_okx) or time.time() < bot["pause_jusqua"]:
@@ -213,10 +239,18 @@ def check_bot():
         mise_exec = 0.0
         tx_id = "-"
 
+        # Signal A : Achat Uniswap Base / Vente OKX Europe
         if mise_a >= MISE_MIN_TRADE:
             qty_recue_dex = quote_achat_dex(cfg["token"], cfg["dec"], cfg["fee"], mise_a)
             p_achat_dex_net = mise_a / qty_recue_dex
             spread_a = (p_okx - p_achat_dex_net) / p_achat_dex_net
+            sp_a_pct = spread_a * 100.0
+            ETAT_WEB["sp_a"] = sp_a_pct
+            if sp_a_pct > 0:
+                if sp_a_pct > ETAT_WEB["max_a"]:
+                    ETAT_WEB["max_a"] = sp_a_pct
+                ETAT_WEB["sum_pos_a"] += sp_a_pct
+                ETAT_WEB["cnt_pos_a"] += 1
 
             if spread_a > seuil_a:
                 bot["pause_jusqua"] = time.time() + COOLDOWN_SECONDES
@@ -243,11 +277,19 @@ def check_bot():
                     bot["annules_quoter"] += 1
                     action = "🛡️ ANNULÉ QUOTER (0.000 $ gas)"
 
+        # Signal B : Achat OKX Europe / Vente Uniswap Base
         if not action and mise_v >= MISE_MIN_TRADE:
             qty_est_v = mise_v / p_okx
             usdc_recu_dex = quote_vente_dex(cfg["token"], cfg["dec"], cfg["fee"], qty_est_v)
             p_vente_dex_net = usdc_recu_dex / qty_est_v
             spread_v = (p_vente_dex_net - p_okx) / p_okx
+            sp_v_pct = spread_v * 100.0
+            ETAT_WEB["sp_v"] = sp_v_pct
+            if sp_v_pct > 0:
+                if sp_v_pct > ETAT_WEB["max_v"]:
+                    ETAT_WEB["max_v"] = sp_v_pct
+                ETAT_WEB["sum_pos_v"] += sp_v_pct
+                ETAT_WEB["cnt_pos_v"] += 1
 
             if spread_v > seuil_v:
                 bot["pause_jusqua"] = time.time() + COOLDOWN_SECONDES
@@ -295,19 +337,12 @@ while time.time() < end_time:
     if time.time() - last_live >= 180:
         now_l = datetime.now().strftime("%H:%M:%S")
         try:
-            p_c = lire_prix_okx(cfg["inst"])
-            q_a = quote_achat_dex(cfg["token"], cfg["dec"], cfg["fee"], 250.0)
-            q_v = quote_vente_dex(cfg["token"], cfg["dec"], cfg["fee"], 250.0 / p_c)
-            sp_a = ((p_c - (250.0 / q_a)) / (250.0 / q_a)) * 100
-            sp_v = (((q_v / (250.0 / p_c)) - p_c) / p_c) * 100
-            ETAT_WEB["sp_a"] = sp_a
-            ETAT_WEB["sp_v"] = sp_v
             ETAT_WEB["dex_usdc"] = bot["dex_usdc"]
             ETAT_WEB["okx_usdc"] = bot["okx_usdc"]
             statut = "TRANSFERT (3m)" if time.time() < bot["en_transfert_jusqua"] else f"Dispo A/V:{bot['dex_usdc']:.0f}$/{bot['okx_usdc']:.0f}$"
-            ajouter_log(f"[{now_l}] SCAN 3 MIN -> Achat:{sp_a:+.3f}% | Vente:{sp_v:+.3f}% | {statut} | Rebal:{bot['nb_rebalances']} | Cumul:{bot['gain_arbitrage_pur']:+.2f}$ ({bot['trades_ok']}W)")
+            ajouter_log(f"[{now_l}] SCAN 3 MIN -> Achat:{ETAT_WEB['sp_a']:+.3f}% | Vente:{ETAT_WEB['sp_v']:+.3f}% | Max:{ETAT_WEB['max_a']:+.3f}%/{ETAT_WEB['max_v']:+.3f}% | {statut} | Cumul:{bot['gain_arbitrage_pur']:+.2f}$ ({bot['trades_ok']}W)")
         except Exception:
             pass
         last_live = time.time()
     time.sleep(0.35)
-                           
+        
